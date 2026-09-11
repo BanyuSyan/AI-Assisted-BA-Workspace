@@ -49,6 +49,23 @@ OUTPUT SRS WAJIB:
 | FR ID | Modul | Deskripsi Terukur | RBAC | Prioritas | Story Points (1/2/3/5/8/13) | Justifikasi Teknis |
 Setiap FR harus atomik, testable, dan memiliki Story Points Fibonacci beserta justifikasi singkat.
 
+### 3A. ANALISIS PROSES BISNIS (BPMN)
+Ekstrak dua proses dari catatan klien dan jangan mengarang proses yang tidak disebutkan:
+
+#### AS-IS PROCESS — Proses Saat Ini
+Jelaskan alur manual/saat ini, bottleneck, intervensi manual, risiko, atau titik gagal yang didukung catatan. Lalu buat tepat satu blok Mermaid flowchart dengan `graph TD` atau `graph LR`.
+
+#### TO-BE PROCESS — Proses Target Terotomatisasi
+Jelaskan alur target setelah sistem diimplementasikan, otomatisasi, kontrol, dan efisiensi yang diusulkan. Lalu buat tepat satu blok Mermaid flowchart dengan `graph TD` atau `graph LR`.
+
+Aturan flowchart ketat: gunakan ID node alfanumerik sederhana (contoh `A`, `B1`), label singkat dalam tanda siku, tanpa tanda kutip, kurung, kurung siku bersarang, atau karakter khusus di dalam label. Contoh valid:
+```mermaid
+graph TD
+    A[Kasir input transaksi manual] --> B[Stok dicatat terlambat]
+    B --> C[Selisih stok terdeteksi]
+```
+Jika proses As-Is tidak dijelaskan klien, tulis TBD dan jangan membuat diagram fiktif.
+
 ### 4. USER STORIES & BDD ACCEPTANCE CRITERIA
 Untuk SETIAP FR tulis satu User Story dan tabel BDD:
 | Tipe Skenario | Given | When | Then |
@@ -60,7 +77,13 @@ Skenario exception wajib menjelaskan validasi input, kegagalan dependensi, atau 
 ### 5. DATABASE ARCHITECTURE & DATA DICTIONARY (POSTGRESQL)
 Sajikan skema tabel 3NF dan tabel Kamus Data:
 | Table Name | Field Name | Data Type | Constraints (PK/FK/NOT NULL) | Business Logic |
-Lalu tampilkan satu blok Mermaid ERD lengkap.
+Lalu tampilkan satu blok Mermaid ERD lengkap. Aturan sintaks ketat: `erDiagram`
+harus menjadi baris pertama; setiap entity harus dibuka pada baris sendiri
+(`TABLE_NAME {`), setiap field pada baris sendiri, dan `}` harus sendiri pada
+baris penutup sebelum entity berikutnya. Jangan menulis `} TABLE_NAME {` dalam
+satu baris. Gunakan identifier tabel/kolom `snake_case` tanpa spasi. Dalam
+blok Mermaid hanya gunakan key `PK`, `FK`, atau `UK`; tulis `INDEX`, `NOT NULL`,
+`DEFAULT`, dan constraint PostgreSQL lain pada Data Dictionary, bukan ERD.
 
 ### 6. FEATURE-TO-API MAPPING MATRIX
 | FR ID | HTTP Method | Endpoint Path | Request Payload / Params | Response Status |

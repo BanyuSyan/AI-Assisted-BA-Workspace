@@ -24,28 +24,37 @@ KONTRAK KUALITAS:
    harus ada di tabel **Asumsi yang Perlu Validasi** atau **Clarification Needed**.
 3. Setiap FR harus atomik, memiliki kode FR-XX, RBAC, prioritas, Fibonacci Story
    Points (1, 2, 3, 5, 8, 13), dan justifikasi teknis singkat.
-4. Setiap FR harus memiliki User Story serta tabel BDD **Given | When | Then**
+4. Wajib buat section **ANALISIS PROSES BISNIS (BPMN)** sebelum User Stories:
+   - **AS-IS PROCESS — Proses Saat Ini:** ekstrak hanya alur manual saat ini,
+     bottleneck, intervensi manual, atau titik gagal yang dinyatakan klien.
+   - **TO-BE PROCESS — Proses Target Terotomatisasi:** tampilkan alur target,
+     otomatisasi, validasi, dan kontrol sistem baru.
+   - Masing-masing section harus memiliki satu blok Mermaid terpisah dengan
+     `graph TD` atau `graph LR`. Gunakan ID node sederhana dan label pendek
+     dalam tanda siku. Jangan gunakan tanda kutip, kurung, atau karakter khusus
+     di dalam label. Jika As-Is tidak tersedia, tulis TBD tanpa diagram fiktif.
+5. Setiap FR harus memiliki User Story serta tabel BDD **Given | When | Then**
    yang berisi tepat minimal tiga skenario: Main/Happy Path, Alternative/Edge
    Case, dan Exception/Error Handling. Skenario harus dapat diuji QA.
-5. Sertakan skema PostgreSQL 3NF, Data Dictionary dengan kolom **Table Name,
+6. Sertakan skema PostgreSQL 3NF, Data Dictionary dengan kolom **Table Name,
    Field Name, Data Type, Constraints, Business Logic**, dan satu blok Mermaid
    ERD tunggal. Seluruh relasi dan entitas harus berada pada blok yang sama.
-6. Identifikasi PII/sensitive data yang benar-benar tersirat atau disebut pada
+7. Identifikasi PII/sensitive data yang benar-benar tersirat atau disebut pada
    cerita kasus. Buat Data Protection Requirement mencakup enkripsi, RBAC,
    retensi, dan risiko UU PDP/GDPR. Bila data sensitif tidak disebut, nyatakan
    sebagai TBD, bukan fakta.
-7. Buat Feature-to-API Mapping Matrix:
+8. Buat Feature-to-API Mapping Matrix:
    | FR ID | HTTP Method | Endpoint Path | Request Payload / Params | Response Status |
    Gunakan RESTful API dan status HTTP yang relevan.
-8. Sertakan Definition of Done (DoD) yang memuat kriteria verifikasi implementasi,
+9. Sertakan Definition of Done (DoD) yang memuat kriteria verifikasi implementasi,
    test BDD, security/privacy check, migration, API contract, observability, dan
    dokumentasi.
-9. Output harus berupa Markdown terstruktur, tabel penuh, istilah tegas, dan
+10. Output harus berupa Markdown terstruktur, tabel penuh, istilah tegas, dan
    tanpa salam/pembuka/penutup generik.
 """,
         expected_output=(
             "SRS lengkap berisi fakta dan asumsi terpisah, FR dengan Story Points, "
-            "BDD tiga skenario per FR, data dictionary, Mermaid ERD tunggal, "
+            "BPMN As-Is/To-Be, BDD tiga skenario per FR, data dictionary, Mermaid ERD tunggal, "
             "privacy/security requirements, serta Feature-to-API Mapping Matrix."
         ),
         agent=ba_agent,

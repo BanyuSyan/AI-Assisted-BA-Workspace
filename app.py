@@ -89,20 +89,135 @@ def extract_mermaid_blocks(markdown_text: str) -> list[tuple[str, str]]:
     return blocks or [("markdown", markdown_text)]
 
 
+def normalize_mermaid_erd(mermaid_code: str) -> str:
+    """Memperbaiki pemisah baris ERD umum dari keluaran LLM sebelum dirender."""
+    cleaned_code = mermaid_code.strip()
+    cleaned_code = re.sub(r"^```mermaid\s*", "", cleaned_code, flags=re.I)
+    cleaned_code = cleaned_code.replace("```", "").strip()
+    if not cleaned_code.startswith("erDiagram"):
+        cleaned_code = f"erDiagram\n{cleaned_code}"
+
+    # LLM kadang menyatukan penutup blok dengan deklarasi entitas berikutnya:
+    # `field_name } products {` harus menjadi dua baris berbeda.
+    cleaned_code = re.sub(
+        r"}\s*(?=[A-Za-z_][A-Za-z0-9_]*\s*\{)",
+        "}\n",
+        cleaned_code,
+    )
+    cleaned_code = re.sub(
+        r"(?<!\n)([A-Z][A-Z0-9_]*)\s*\{",
+        r"\n\1 {",
+        cleaned_code,
+    )
+
+    # Mermaid ERD hanya menerima key PK/FK/UK. Detail PostgreSQL seperti INDEX,
+    # NOT NULL, DEFAULT, dan CHECK harus tetap berada di Data Dictionary, bukan ERD.
+    normalized_lines = []
+    is_inside_entity = False
+    for line in cleaned_code.splitlines():
+        stripped_line = line.strip()
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*\{$", stripped_line):
+            is_inside_entity = True
+            normalized_lines.append(stripped_line)
+            continue
+        if stripped_line == "}":
+            is_inside_entity = False
+            normalized_lines.append(stripped_line)
+            continue
+        if is_inside_entity and stripped_line:
+            attribute_match = re.match(
+                r"^([A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+.*)?$",
+                stripped_line,
+            )
+            if attribute_match:
+                data_type, field_name = attribute_match.groups()
+                valid_keys = re.findall(r"\b(PK|FK|UK)\b", stripped_line, re.I)
+                key_suffix = f" {valid_keys[0].upper()}" if valid_keys else ""
+                normalized_lines.append(f"{data_type} {field_name}{key_suffix}")
+                continue
+        normalized_lines.append(stripped_line)
+
+    cleaned_code = "\n".join(normalized_lines)
+    cleaned_code = re.sub(r"\n{3,}", "\n\n", cleaned_code)
+    return cleaned_code.strip()
+
+
+def sanitize_mermaid_flowchart(mermaid_code: str) -> str:
+    """Membersihkan flowchart Mermaid tanpa merusak simbol panah atau node."""
+    cleaned_code = mermaid_code.strip()
+    cleaned_code = re.sub(
+        r"^" + re.escape(FENCE) + r"(?:mermaid)?\s*",
+        "",
+        cleaned_code,
+        flags=re.I,
+    )
+    cleaned_code = cleaned_code.replace(FENCE, "").strip()
+    if not re.match(r"^graph\s+(TD|LR)\b", cleaned_code, re.I):
+        cleaned_code = f"graph TD\n{cleaned_code}"
+
+    def clean_node_label(match: re.Match) -> str:
+        label = match.group(1)
+        label = re.sub(r"""["'{}\[\]()]""", "", label)
+        label = re.sub(r"\s+", " ", label).strip()
+        return f"[{label}]"
+
+    cleaned_code = re.sub(r"\[([^\]]*)\]", clean_node_label, cleaned_code)
+    cleaned_code = cleaned_code.replace('"', "").replace("'", "")
+    cleaned_code = re.sub(r"\n{3,}", "\n\n", cleaned_code)
+    return cleaned_code.strip()
+
+
+def extract_process_flowcharts(markdown_text: str) -> dict[str, str]:
+    """Mengekstrak diagram As-Is dan To-Be dari section proses bisnis."""
+    sections = {}
+    heading_pattern = re.compile(
+        r"(?ims)^#{1,6}\s*(?:\d+(?:\.\d+)*\.?\s*)?"
+        r"(?:AS[-\s]?IS|TO[-\s]?BE)[^\n]*$"
+    )
+    matches = list(heading_pattern.finditer(markdown_text))
+    for index, match in enumerate(matches):
+        section_end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown_text)
+        heading = match.group(0).upper().replace(" ", "")
+        flow_type = "as_is" if "AS-IS" in heading or "ASIS" in heading else "to_be"
+        mermaid_match = MERMAID_PATTERN.search(markdown_text, match.end(), section_end)
+        if mermaid_match:
+            sections[flow_type] = sanitize_mermaid_flowchart(mermaid_match.group(1))
+
+    flow_blocks = [
+        sanitize_mermaid_flowchart(match.group(1))
+        for match in MERMAID_PATTERN.finditer(markdown_text)
+        if re.match(r"^\s*graph\s+(TD|LR)\b", match.group(1), re.I)
+    ]
+    if "as_is" not in sections and flow_blocks:
+        sections["as_is"] = flow_blocks[0]
+    if "to_be" not in sections and len(flow_blocks) > 1:
+        sections["to_be"] = flow_blocks[1]
+    return sections
+
+
 def render_mermaid_diagram(mermaid_code: str) -> None:
     """Merender Mermaid.js ke SVG di dalam Streamlit."""
     diagram_id = f"mermaid-{uuid.uuid4().hex}"
+    normalized_code = (
+        normalize_mermaid_erd(mermaid_code)
+        if mermaid_code.lstrip().lower().startswith("erdiagram")
+        else sanitize_mermaid_flowchart(mermaid_code)
+    )
     component_html = f"""
     <div id="{diagram_id}" class="mermaid-host"></div>
     <script type="module">
       import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-      const source = {json.dumps(mermaid_code)};
+      const source = {json.dumps(normalized_code)};
       const host = document.getElementById("{diagram_id}");
       mermaid.initialize({{
         startOnLoad: false, theme: "neutral", securityLevel: "strict",
         er: {{ useMaxWidth: true }}
       }});
       try {{
+        const isValid = await mermaid.parse(source, {{ suppressErrors: true }});
+        if (!isValid) {{
+          throw new Error("Sintaks Mermaid tidak valid setelah sanitasi otomatis.");
+        }}
         const rendered = await mermaid.render("{diagram_id}-svg", source);
         host.innerHTML = rendered.svg;
       }} catch (error) {{
@@ -120,7 +235,32 @@ def render_mermaid_diagram(mermaid_code: str) -> None:
         components.html(component_html, height=440, scrolling=True)
     except Exception as error:
         st.warning(f"Renderer Mermaid tidak tersedia: {error}")
-        st.code(mermaid_code, language="mermaid")
+        st.code(normalized_code, language="mermaid")
+
+
+def render_process_mapping(markdown_text: str) -> None:
+    """Menampilkan perbandingan visual proses As-Is dan To-Be."""
+    flowcharts = extract_process_flowcharts(markdown_text)
+    st.markdown("### Analisis Proses Bisnis (BPMN)")
+    st.caption(
+        "Perbandingan alur manual saat ini dan alur target terotomatisasi. "
+        "Kode Mermaid tersedia bila diagram gagal dirender."
+    )
+    as_is_column, to_be_column = st.columns(2)
+    definitions = [
+        (as_is_column, "as_is", "As-Is — Proses Saat Ini", "Diagram As-Is belum dihasilkan."),
+        (to_be_column, "to_be", "To-Be — Proses Target", "Diagram To-Be belum dihasilkan."),
+    ]
+    for column, key, title, empty_message in definitions:
+        with column:
+            st.markdown(f"#### {title}")
+            diagram_code = flowcharts.get(key)
+            if not diagram_code:
+                st.info(empty_message)
+                continue
+            render_mermaid_diagram(diagram_code)
+            with st.expander(f"Lihat kode Mermaid {title}"):
+                st.code(diagram_code, language="mermaid")
 
 
 def render_srs_markdown(markdown_text: str) -> None:
@@ -130,7 +270,7 @@ def render_srs_markdown(markdown_text: str) -> None:
             st.caption("Entity Relationship Diagram")
             render_mermaid_diagram(content)
             with st.expander("Lihat kode Mermaid"):
-                st.code(content, language="mermaid")
+                st.code(normalize_mermaid_erd(content), language="mermaid")
         elif content.strip():
             st.markdown(content)
 
@@ -400,11 +540,18 @@ def display_document(data: dict) -> None:
     """Menampilkan SRS, audit, dan tombol ekspor dalam tab terpisah."""
     st.markdown(f"## {data['judul']}")
     st.caption("Dokumen SRS dan audit Red Team berbasis CrewAI.")
-    srs_tab, audit_tab, export_tab = st.tabs(
-        ["📘 SRS Document", "🛡️ Red Team Audit Report", "📤 Export"]
+    srs_tab, process_tab, audit_tab, export_tab = st.tabs(
+        [
+            "📘 SRS Document",
+            "🔄 Analisis Proses Bisnis (BPMN)",
+            "🛡️ Red Team Audit Report",
+            "📤 Export",
+        ]
     )
     with srs_tab:
         render_srs_markdown(data["srs_text"])
+    with process_tab:
+        render_process_mapping(data["srs_text"])
     with audit_tab:
         st.markdown("### Risk & Gap Matrix")
         render_risk_gap_matrix(data["audit_text"])
