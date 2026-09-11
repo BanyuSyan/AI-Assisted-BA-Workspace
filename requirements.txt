@@ -1,0 +1,6 @@
+streamlit
+crewai
+google-genai
+python-docx
+markdown
+pandas
