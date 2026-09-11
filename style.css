@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
-
 :root {
     --notion-text: #37352f;
     --notion-muted: #787774;
@@ -11,14 +9,27 @@
 
 html,
 body,
-[class*="st-"],
-[class*="css"] {
+.stApp,
+[data-testid="stAppViewContainer"] {
     color: var(--notion-text);
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+}
+
+/* Memulihkan glyph Material milik Streamlit agar tidak dirender sebagai teks. */
+.material-symbols-rounded,
+.material-symbols-outlined,
+.material-icons,
+[data-testid="stSidebarCollapseButton"] span {
+    font-family: "Material Symbols Rounded", "Material Icons", sans-serif !important;
+    font-style: normal !important;
+    font-weight: normal !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    white-space: nowrap !important;
 }
 
 .stApp {
-    background: #ffffff;
+    background: #fbfbfb;
 }
 
 header[data-testid="stHeader"] {
@@ -35,13 +46,46 @@ footer {
     padding-top: 2.5rem;
 }
 
+h1,
+h2,
+h3 {
+    color: #37352f !important;
+    letter-spacing: -0.03em;
+}
+
+h1 {
+    font-size: clamp(2rem, 4vw, 2.65rem) !important;
+    font-weight: 700 !important;
+    line-height: 1.18 !important;
+    margin-bottom: 0.35rem !important;
+}
+
+h2 {
+    font-size: 1.45rem !important;
+    font-weight: 650 !important;
+}
+
+[data-testid="stCaptionContainer"] {
+    color: #787774 !important;
+    font-size: 0.88rem;
+    line-height: 1.5;
+}
+
 [data-testid="stSidebar"] {
     background: var(--notion-sidebar);
     border-right: 1px solid var(--notion-border);
+    min-width: 292px;
 }
 
 [data-testid="stSidebarContent"] {
-    padding: 1.15rem 0.65rem;
+    box-sizing: border-box;
+    padding: 1.35rem 0.85rem 2rem;
+}
+
+/* Tombol collapse bawaan disembunyikan: brand sidebar menjadi header yang bersih. */
+[data-testid="stSidebarHeader"],
+[data-testid="stSidebarCollapseButton"] {
+    display: none !important;
 }
 
 [data-testid="stSidebar"] h2 {
@@ -51,12 +95,37 @@ footer {
     margin-bottom: 0.1rem;
 }
 
+.sidebar-brand {
+    align-items: center;
+    color: #37352f;
+    display: flex;
+    font-size: 0.98rem;
+    font-weight: 650;
+    gap: 0.55rem;
+    letter-spacing: -0.015em;
+    margin: 0.1rem 0 0.35rem 0.3rem;
+    min-height: 32px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.sidebar-brand span {
+    align-items: center;
+    background: #f1f3f5;
+    border-radius: 6px;
+    display: inline-flex;
+    font-size: 0.95rem;
+    height: 26px;
+    justify-content: center;
+    width: 26px;
+}
+
 .sidebar-label {
     color: #9b9a97;
     font-size: 0.69rem;
     font-weight: 600;
     letter-spacing: 0.08em;
-    margin: 1.15rem 0 0.45rem 0.55rem;
+    margin: 1.3rem 0 0.5rem 0.3rem;
 }
 
 [data-testid="stSidebar"] .stButton > button {
@@ -70,8 +139,8 @@ footer {
     font-size: 0.88rem;
     font-weight: 500;
     justify-content: flex-start;
-    min-height: 32px;
-    padding: 6px 9px;
+    min-height: 38px;
+    padding: 8px 10px;
     text-align: left;
     transition: background 120ms ease;
     width: 100%;
@@ -79,10 +148,17 @@ footer {
 
 [data-testid="stSidebar"] .stButton > button:hover,
 [data-testid="stSidebar"] .stButton > button:focus-visible {
-    background: #efefed;
+    background: #f1f3f5;
     border: 0;
     box-shadow: none;
     color: var(--notion-text);
+}
+
+[data-testid="stSidebar"] .stButton > button p {
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 [data-testid="stSidebar"] [data-testid="stExpander"] {
@@ -106,6 +182,13 @@ footer {
     padding: 0.65rem 0.75rem;
 }
 
+[data-testid="stForm"] {
+    background: #ffffff;
+    border: 1px solid var(--notion-border);
+    border-radius: 10px;
+    padding: 1.25rem 1.35rem 1.1rem;
+}
+
 .stTextInput input:focus,
 .stTextArea textarea:focus {
     border-color: var(--notion-blue);
@@ -118,7 +201,7 @@ footer {
 
 .stButton > button,
 [data-testid="stFormSubmitButton"] > button {
-    border-radius: 6px;
+    border-radius: 8px;
     box-shadow: none;
     font-weight: 600;
     transition: background 120ms ease, border-color 120ms ease;
@@ -126,14 +209,19 @@ footer {
 
 .stButton > button[kind="primary"],
 [data-testid="stFormSubmitButton"] > button {
-    background: #2383e2;
-    border-color: #2383e2;
+    background: #2563eb;
+    border-color: #2563eb;
+    box-shadow: 0 1px 2px rgb(37 99 235 / 18%);
+    min-height: 42px;
+    padding: 0.55rem 1rem;
 }
 
 .stButton > button[kind="primary"]:hover,
 [data-testid="stFormSubmitButton"] > button:hover {
-    background: #1a73c9;
-    border-color: #1a73c9;
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+    box-shadow: 0 4px 10px rgb(37 99 235 / 20%);
+    transform: translateY(-1px);
 }
 
 [data-testid="stTabs"] [data-baseweb="tab-list"] {

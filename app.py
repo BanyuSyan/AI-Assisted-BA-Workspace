@@ -8,9 +8,10 @@ import uuid
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
-from crewai import Crew, Process
+from crewai import Crew, Process, Task
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
@@ -198,8 +199,8 @@ def add_markdown_to_docx(document: Document, markdown_text: str) -> None:
         index += 1
 
 
-def create_srs_docx(title: str, srs_text: str) -> bytes:
-    """Membuat berkas DOCX berisi SRS dan tabelnya."""
+def create_srs_docx(title: str, srs_text: str, audit_text: str = "") -> bytes:
+    """Membuat DOCX lengkap dari SRS beserta lampiran audit Red Team."""
     document = Document()
     section = document.sections[0]
     section.top_margin = section.bottom_margin = Inches(0.65)
@@ -212,6 +213,10 @@ def create_srs_docx(title: str, srs_text: str) -> bytes:
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
     document.add_paragraph()
     add_markdown_to_docx(document, srs_text)
+    if audit_text.strip():
+        document.add_page_break()
+        document.add_heading("Lampiran A — Laporan Red Team Audit", level=1)
+        add_markdown_to_docx(document, audit_text)
     buffer = io.BytesIO()
     document.save(buffer)
     return buffer.getvalue()
@@ -297,6 +302,49 @@ def calculate_priority_counts(fr_dataframe: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({"Priority": priorities, "Jumlah FR": [counts[item] for item in priorities]}).set_index("Priority")
 
 
+def render_priority_chart(priority_counts: pd.DataFrame) -> None:
+    """Menampilkan chart prioritas horizontal dengan gaya minimalis."""
+    colors = {"High": "#e76f6f", "Medium": "#d9a441", "Low": "#5b9bbd"}
+    labels = priority_counts.index.tolist()
+    values = priority_counts["Jumlah FR"].tolist()
+    figure = go.Figure(
+        go.Bar(
+            x=labels,
+            y=values,
+            marker_color=[colors.get(label, "#2563eb") for label in labels],
+            text=values,
+            textposition="outside",
+            hovertemplate="%{x}: %{y} FR<extra></extra>",
+            width=0.52,
+        )
+    )
+    figure.update_layout(
+        height=330,
+        margin={"l": 12, "r": 12, "t": 18, "b": 12},
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+        showlegend=False,
+        font={"family": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif", "color": "#37352F"},
+    )
+    figure.update_xaxes(
+        categoryorder="array",
+        categoryarray=["High", "Medium", "Low"],
+        showgrid=False,
+        tickangle=0,
+        fixedrange=True,
+        title=None,
+    )
+    figure.update_yaxes(
+        showgrid=False,
+        showline=False,
+        zeroline=False,
+        rangemode="tozero",
+        fixedrange=True,
+        title=None,
+    )
+    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+
+
 def calculate_risk_counts(audit_text: str) -> dict[str, int]:
     """Menghitung indikasi risiko dari laporan auditor."""
     return {
@@ -365,7 +413,7 @@ def display_document(data: dict) -> None:
     with export_tab:
         st.download_button(
             "📄 Download SRS as Word Document",
-            data=create_srs_docx(data["judul"], data["srs_text"]),
+            data=create_srs_docx(data["judul"], data["srs_text"], data["audit_text"]),
             file_name=f"{sanitize_filename(data['judul'])}_SRS.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             type="primary",
@@ -376,7 +424,114 @@ def display_document(data: dict) -> None:
             file_name=f"{sanitize_filename(data['judul'])}_SRS.md",
             mime="text/markdown",
         )
-        st.caption("Berkas Word memuat ringkasan, user stories, serta tabel SRS.")
+        st.caption("Berkas Word memuat SRS lengkap, DoD bila tersedia, dan lampiran audit Red Team.")
+
+    render_revision_box(data)
+
+
+def run_revision(data: dict, revision_instruction: str) -> None:
+    """Memperbarui SRS aktif tanpa mengulang ekstraksi business case dari nol."""
+    api_key = st.session_state.user.get("api_key", "").strip()
+    if not api_key:
+        raise ValueError("Gemini API key belum dikonfigurasi.")
+
+    os.environ["GEMINI_API_KEY"] = api_key
+    with st.spinner("Business Analyst memperbarui SRS dan Red Team mengaudit revisinya..."):
+        ba_agent, auditor_agent = create_agents(GEMINI_MODEL_NAME)
+        revision_task = Task(
+            description=f"""
+Perbarui dokumen SRS yang ada berdasarkan instruksi revisi pengguna.
+
+ATURAN KERJA:
+1. Ini revisi incremental. Jangan mengulang ekstraksi atau mengarang ulang fakta
+   dari business case awal.
+2. Pertahankan artefak SRS yang masih relevan, lalu perbarui hanya bagian yang
+   terdampak: FR, BDD, data dictionary, ERD, API mapping, privacy/security,
+   dan Definition of Done.
+3. Jika instruksi ambigu atau bertentangan dengan SRS lama, catat sebagai asumsi
+   atau pertanyaan klarifikasi; jangan menganggapnya fakta.
+4. Keluarkan SRS lengkap hasil revisi sesuai struktur baku.
+
+<BUSINESS_CASE_ASLI>
+{data["studi_kasus"]}
+</BUSINESS_CASE_ASLI>
+
+<SRS_LAMA>
+{data["srs_text"]}
+</SRS_LAMA>
+
+<INSTRUKSI_REVISI_PENGGUNA>
+{revision_instruction}
+</INSTRUKSI_REVISI_PENGGUNA>
+""",
+            expected_output="SRS lengkap hasil revisi incremental yang dapat diuji.",
+            agent=ba_agent,
+        )
+        revision_audit_task = Task(
+            description=f"""
+Audit SRS hasil revisi pada konteks task. Fokus pada dampak instruksi pengguna:
+
+<INSTRUKSI_REVISI_PENGGUNA>
+{revision_instruction}
+</INSTRUKSI_REVISI_PENGGUNA>
+
+Jangan menulis ulang SRS. Pastikan perubahan tidak menimbulkan regression pada
+business logic, BDD, database, API mapping, PII, RBAC, UU PDP/GDPR, atau
+Definition of Done. Gunakan format Red Team audit, skor objektif, severity,
+dan action item P0/P1/P2.
+""",
+            expected_output="Laporan audit Red Team untuk SRS hasil revisi.",
+            agent=auditor_agent,
+            context=[revision_task],
+        )
+        crew = Crew(
+            agents=[ba_agent, auditor_agent],
+            tasks=[revision_task, revision_audit_task],
+            process=Process.sequential,
+            verbose=False,
+        )
+        crew_output = crew.kickoff()
+
+    revised_srs = get_task_output(revision_task) or str(crew_output)
+    revised_audit = get_task_output(revision_audit_task) or "Laporan audit revisi tidak tersedia."
+    revised_title = f"{data['judul']} — Revisi"
+    stored_result = f"{revised_srs}{RESULT_DELIMITER}{revised_audit}"
+    document_id = db.save_srs_version(
+        st.session_state.user["id"],
+        revised_title,
+        data["studi_kasus"],
+        stored_result,
+    )
+    st.session_state.selected_srs = {
+        "id": document_id,
+        "judul": revised_title,
+        "studi_kasus": data["studi_kasus"],
+        "srs_text": revised_srs,
+        "audit_text": revised_audit,
+    }
+    st.session_state.last_srs_result = revised_srs
+    st.session_state.last_audit_result = revised_audit
+    st.session_state.last_project_title = revised_title
+
+
+def render_revision_box(data: dict) -> None:
+    """Menyediakan input Human-in-the-Loop setelah hasil analisis."""
+    st.divider()
+    st.markdown("### Revisi & Refine")
+    st.caption(
+        "Masukkan perubahan spesifik. SRS aktif diperbarui dan diaudit ulang tanpa "
+        "mengekstrak business case dari awal."
+    )
+    instruction = st.chat_input(
+        "Contoh: Tambahkan approval manager untuk pembatalan pesanan di atas Rp5 juta.",
+        key=f"revision_instruction_{data['id']}",
+    )
+    if instruction:
+        try:
+            run_revision(data, instruction.strip())
+            st.rerun()
+        except Exception as error:
+            st.error(f"Revisi gagal dijalankan: {error}")
 
 
 def select_history_document(item: tuple) -> None:
@@ -401,7 +556,7 @@ def render_sidebar() -> None:
     """Membuat sidebar minimalis bergaya Notion."""
     user = st.session_state.user
     with st.sidebar:
-        st.markdown("## AI Systems Analyst")
+        st.markdown("<div class='sidebar-brand'><span>⚡</span> AI Systems Analyst</div>", unsafe_allow_html=True)
         st.caption(f"Workspace · {user['username']}")
         st.markdown("<div class='sidebar-label'>WORKSPACE</div>", unsafe_allow_html=True)
         if st.button("✨ SRS Studio", use_container_width=True):
@@ -516,7 +671,7 @@ def render_generator() -> None:
             height=260,
             placeholder="Jelaskan masalah bisnis, pengguna, alur kerja, data, dan batasan sistem.",
         )
-        submitted = st.form_submit_button("✦ Jalankan Analisis Multi-Agent", type="primary")
+        submitted = st.form_submit_button("🚀 Jalankan Analisis Multi-Agent", type="primary")
     if submitted:
         api_key = st.session_state.user.get("api_key", "").strip()
         if not api_key:
@@ -576,13 +731,13 @@ def render_analytics() -> None:
     metric_columns[2].metric("Estimasi Sprint", f"{sprint_weeks} minggu")
     metric_columns[3].metric("Estimasi Man-Hours", f"{man_hours:,} jam")
     st.markdown("### Distribusi Prioritas Functional Requirements")
-    st.bar_chart(priority_counts, use_container_width=True)
+    render_priority_chart(priority_counts)
     st.dataframe(fr_dataframe, use_container_width=True, hide_index=True)
 
 
 def render_export_center() -> None:
     """Menyediakan ekspor Jira CSV, Word, dan BDD Feature."""
-    title, srs_text, _ = get_active_results()
+    title, srs_text, audit_text = get_active_results()
     st.title("Export Center")
     st.caption("Ekspor artefak analisis ke format siap pakai.")
     if not srs_text:
@@ -609,7 +764,7 @@ def render_export_center() -> None:
         with second_column:
             st.download_button(
                 "📄 Unduh SRS sebagai Microsoft Word",
-                data=create_srs_docx(title, srs_text),
+                data=create_srs_docx(title, srs_text, audit_text),
                 file_name=f"{sanitize_filename(title)}_SRS.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 type="primary",
