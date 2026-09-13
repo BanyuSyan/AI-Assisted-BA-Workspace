@@ -2,6 +2,11 @@
 
 from crewai import Task
 
+DRAWIO_CONNECT_DIRECTIVE = (
+    '# connect: {"from":"connects", "to":"id", '
+    '"style":"curved=0;endArrow=block;"}'
+)
+
 
 def create_tasks(studi_kasus, ba_agent, auditor_agent):
     """Membuat task BA dan auditor dengan konteks output yang berantai."""
@@ -29,10 +34,22 @@ KONTRAK KUALITAS:
      bottleneck, intervensi manual, atau titik gagal yang dinyatakan klien.
    - **TO-BE PROCESS — Proses Target Terotomatisasi:** tampilkan alur target,
      otomatisasi, validasi, dan kontrol sistem baru.
-   - Masing-masing section harus memiliki satu blok Mermaid terpisah dengan
-     `graph TD` atau `graph LR`. Gunakan ID node sederhana dan label pendek
-     dalam tanda siku. Jangan gunakan tanda kutip, kurung, atau karakter khusus
-     di dalam label. Jika As-Is tidak tersedia, tulis TBD tanpa diagram fiktif.
+   - Keluarkan PERSIS tiga header parser berikut, masing-masing pada baris sendiri:
+     `### AS-IS MERMAID`, `### TO-BE MERMAID`, dan `### DRAWIO CSV ENGINE`.
+   - Setelah header As-Is dan To-Be, buat masing-masing satu fenced code block
+     berbahasa mermaid dengan `graph TD` atau `graph LR`. Gunakan ID node sederhana
+     dan label pendek dalam tanda siku. Jangan gunakan tanda kutip, kurung, atau
+     karakter khusus di dalam label. Jika As-Is tidak tersedia, tulis TBD tanpa
+     diagram fiktif.
+   - Setelah `### DRAWIO CSV ENGINE`, buat satu fenced code block berbahasa csv
+     yang berisi Draw.io CSV script untuk KEDUA proses. Baris header wajib:
+     `# label: %name%<br><i style="color:gray;">%type%</i>`
+     `# style: shape=%shape%;fillColor=%fill%;strokeColor=#333333;fontColor=#333333;rounded=1;`
+     `# namespace: csvimport`
+     `{DRAWIO_CONNECT_DIRECTIVE}`
+     `# width: auto`, `# height: auto`, `# padding: 15`, `# ignore: id,shape,fill,connects`,
+     `# layout: horizontalflow`, lalu header CSV `id,name,type,shape,fill,connects`.
+     Gunakan ID unik untuk node As-Is dan To-Be, serta nilai connects yang dipisah koma.
 5. Setiap FR harus memiliki User Story serta tabel BDD **Given | When | Then**
    yang berisi tepat minimal tiga skenario: Main/Happy Path, Alternative/Edge
    Case, dan Exception/Error Handling. Skenario harus dapat diuji QA.

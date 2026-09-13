@@ -167,32 +167,69 @@ def sanitize_mermaid_flowchart(mermaid_code: str) -> str:
     return cleaned_code.strip()
 
 
-def extract_process_flowcharts(markdown_text: str) -> dict[str, str]:
-    """Mengekstrak diagram As-Is dan To-Be dari section proses bisnis."""
-    sections = {}
-    heading_pattern = re.compile(
-        r"(?ims)^#{1,6}\s*(?:\d+(?:\.\d+)*\.?\s*)?"
-        r"(?:AS[-\s]?IS|TO[-\s]?BE)[^\n]*$"
-    )
-    matches = list(heading_pattern.finditer(markdown_text))
-    for index, match in enumerate(matches):
-        section_end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown_text)
-        heading = match.group(0).upper().replace(" ", "")
-        flow_type = "as_is" if "AS-IS" in heading or "ASIS" in heading else "to_be"
-        mermaid_match = MERMAID_PATTERN.search(markdown_text, match.end(), section_end)
-        if mermaid_match:
-            sections[flow_type] = sanitize_mermaid_flowchart(mermaid_match.group(1))
-
-    flow_blocks = [
-        sanitize_mermaid_flowchart(match.group(1))
-        for match in MERMAID_PATTERN.finditer(markdown_text)
-        if re.match(r"^\s*graph\s+(TD|LR)\b", match.group(1), re.I)
+def get_mermaid_code_blocks(markdown_text: str) -> list[str]:
+    """Mengambil blok Mermaid utuh dari SRS aktif sebagai satu sumber data."""
+    return [
+        content
+        for block_type, content in extract_mermaid_blocks(markdown_text)
+        if block_type == "mermaid"
     ]
-    if "as_is" not in sections and flow_blocks:
-        sections["as_is"] = flow_blocks[0]
-    if "to_be" not in sections and len(flow_blocks) > 1:
-        sections["to_be"] = flow_blocks[1]
-    return sections
+
+
+def get_process_flowcharts(mermaid_blocks: list[str]) -> list[str]:
+    """Memilih flowchart utuh dari blok Mermaid yang sama dengan body SRS."""
+    return [
+        sanitize_mermaid_flowchart(block)
+        for block in mermaid_blocks
+        if re.match(r"^\s*graph\s+(TD|LR)\b", block, re.I)
+    ]
+
+
+def sanitize_drawio_csv(csv_script: str) -> str:
+    """Membersihkan blok CSV Draw.io tanpa merusak directive engine."""
+    cleaned_script = csv_script.strip().lstrip("\ufeff")
+    cleaned_script = re.sub(
+        r"^" + re.escape(FENCE) + r"(?:csv|text|plaintext)?\s*",
+        "",
+        cleaned_script,
+        flags=re.I,
+    )
+    cleaned_script = cleaned_script.replace(FENCE, "")
+    cleaned_script = cleaned_script.replace("\x00", "")
+    cleaned_script = cleaned_script.replace("\r\n", "\n").replace("\r", "\n")
+    cleaned_lines = []
+    for line in cleaned_script.splitlines():
+        line = line.strip()
+        if not line or line.startswith("###"):
+            continue
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines).strip()
+
+
+def extract_drawio_csv(markdown_text: str) -> str:
+    """Mengambil Draw.io CSV script dari header engine yang diwajibkan agen."""
+    heading_match = re.search(
+        r"(?im)^#{1,6}\s*DRAWIO\s+CSV\s+ENGINE\s*$",
+        markdown_text,
+    )
+    if not heading_match:
+        return ""
+    next_heading = re.search(
+        r"(?m)^#{2,6}\s+",
+        markdown_text[heading_match.end():],
+    )
+    section_end = (
+        heading_match.end() + next_heading.start()
+        if next_heading
+        else len(markdown_text)
+    )
+    section = markdown_text[heading_match.end():section_end]
+    code_match = re.search(
+        re.escape(FENCE) + r"(?:csv|text|plaintext)?[ \t]*\r?\n(.*?)" + re.escape(FENCE),
+        section,
+        re.I | re.S,
+    )
+    return sanitize_drawio_csv(code_match.group(1) if code_match else section)
 
 
 def render_mermaid_diagram(mermaid_code: str) -> None:
@@ -238,9 +275,9 @@ def render_mermaid_diagram(mermaid_code: str) -> None:
         st.code(normalized_code, language="mermaid")
 
 
-def render_process_mapping(markdown_text: str) -> None:
-    """Menampilkan perbandingan visual proses As-Is dan To-Be."""
-    flowcharts = extract_process_flowcharts(markdown_text)
+def render_process_mapping(mermaid_blocks: list[str], markdown_text: str) -> None:
+    """Menampilkan As-Is/To-Be dari blok Mermaid utuh yang sama dengan body SRS."""
+    flowcharts = get_process_flowcharts(mermaid_blocks)
     st.markdown("### Analisis Proses Bisnis (BPMN)")
     st.caption(
         "Perbandingan alur manual saat ini dan alur target terotomatisasi. "
@@ -248,29 +285,65 @@ def render_process_mapping(markdown_text: str) -> None:
     )
     as_is_column, to_be_column = st.columns(2)
     definitions = [
-        (as_is_column, "as_is", "As-Is — Proses Saat Ini", "Diagram As-Is belum dihasilkan."),
-        (to_be_column, "to_be", "To-Be — Proses Target", "Diagram To-Be belum dihasilkan."),
+        (as_is_column, 0, "As-Is — Proses Saat Ini", "Diagram As-Is belum dihasilkan."),
+        (to_be_column, 1, "To-Be — Proses Target", "Diagram To-Be belum dihasilkan."),
     ]
-    for column, key, title, empty_message in definitions:
+    for column, index, title, empty_message in definitions:
         with column:
             st.markdown(f"#### {title}")
-            diagram_code = flowcharts.get(key)
-            if not diagram_code:
+            if len(flowcharts) <= index:
                 st.info(empty_message)
                 continue
+            diagram_code = flowcharts[index]
             render_mermaid_diagram(diagram_code)
             with st.expander(f"Lihat kode Mermaid {title}"):
                 st.code(diagram_code, language="mermaid")
 
+    drawio_csv = extract_drawio_csv(markdown_text)
+    with st.expander("Export Diagram ke Draw.io", expanded=False):
+        st.markdown(
+            "Gunakan skrip CSV berikut untuk membuka kembali proses As-Is dan To-Be "
+            "sebagai diagram yang dapat diedit di Draw.io."
+        )
+        if drawio_csv:
+            st.code(drawio_csv, language="csv")
+            st.download_button(
+                "Unduh Draw.io CSV",
+                data=drawio_csv.encode("utf-8"),
+                file_name="business_process_drawio.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info(
+                "Skrip Draw.io CSV belum tersedia pada dokumen ini. Buat analisis "
+                "baru atau gunakan Revisi & Refine untuk meminta regenerasi diagram."
+            )
+        st.markdown(
+            "1. Salin kode CSV di atas.\n"
+            "2. Buka [app.diagrams.net](https://app.diagrams.net).\n"
+            "3. Pilih **Arrange → Insert → Advanced → CSV**.\n"
+            "4. Tempel kode, lalu klik **Import**."
+        )
 
-def render_srs_markdown(markdown_text: str) -> None:
-    """Menampilkan Markdown dan mengganti kode Mermaid menjadi diagram."""
+
+def render_srs_markdown(
+    markdown_text: str,
+    mermaid_blocks: list[str] | None = None,
+) -> None:
+    """Menampilkan Markdown dengan blok Mermaid dari sumber data yang sama."""
+    supplied_blocks = iter(mermaid_blocks or [])
     for block_type, content in extract_mermaid_blocks(markdown_text):
         if block_type == "mermaid":
+            diagram_code = next(supplied_blocks, content)
             st.caption("Entity Relationship Diagram")
-            render_mermaid_diagram(content)
+            render_mermaid_diagram(diagram_code)
             with st.expander("Lihat kode Mermaid"):
-                st.code(normalize_mermaid_erd(content), language="mermaid")
+                normalized_code = (
+                    normalize_mermaid_erd(diagram_code)
+                    if diagram_code.lstrip().lower().startswith("erdiagram")
+                    else sanitize_mermaid_flowchart(diagram_code)
+                )
+                st.code(normalized_code, language="mermaid")
         elif content.strip():
             st.markdown(content)
 
@@ -540,6 +613,7 @@ def display_document(data: dict) -> None:
     """Menampilkan SRS, audit, dan tombol ekspor dalam tab terpisah."""
     st.markdown(f"## {data['judul']}")
     st.caption("Dokumen SRS dan audit Red Team berbasis CrewAI.")
+    mermaid_blocks = get_mermaid_code_blocks(data["srs_text"])
     srs_tab, process_tab, audit_tab, export_tab = st.tabs(
         [
             "📘 SRS Document",
@@ -549,9 +623,9 @@ def display_document(data: dict) -> None:
         ]
     )
     with srs_tab:
-        render_srs_markdown(data["srs_text"])
+        render_srs_markdown(data["srs_text"], mermaid_blocks)
     with process_tab:
-        render_process_mapping(data["srs_text"])
+        render_process_mapping(mermaid_blocks, data["srs_text"])
     with audit_tab:
         st.markdown("### Risk & Gap Matrix")
         render_risk_gap_matrix(data["audit_text"])
@@ -598,6 +672,10 @@ ATURAN KERJA:
 3. Jika instruksi ambigu atau bertentangan dengan SRS lama, catat sebagai asumsi
    atau pertanyaan klarifikasi; jangan menganggapnya fakta.
 4. Keluarkan SRS lengkap hasil revisi sesuai struktur baku.
+5. Pertahankan atau perbarui section diagram dengan header tepat: `### AS-IS MERMAID`,
+   `### TO-BE MERMAID`, dan `### DRAWIO CSV ENGINE`. Gunakan flowchart Mermaid
+   terpisah untuk As-Is/To-Be dan satu Draw.io CSV script yang memenuhi kontrak
+   output Business Analyst.
 
 <BUSINESS_CASE_ASLI>
 {data["studi_kasus"]}
